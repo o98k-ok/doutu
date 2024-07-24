@@ -27,6 +27,20 @@ type ResponseList []struct {
 	Height int    `json:"height"`
 }
 
+type ResponseListSougou struct {
+	Status int    `json:"status"`
+	Info   string `json:"info"`
+	Data   struct {
+		GroupList []any `json:"groupList"`
+		TagList   []any `json:"tagList"`
+		Emotions  []struct {
+			ThumbSrc string `json:"thumbSrc"`
+			Idx      int    `json:"idx"`
+			Source   string `json:"source"`
+		} `json:"emotions"`
+	} `json:"data"`
+}
+
 func query(key string) ResponseList {
 	dest := url.QueryEscape(key)
 	client := &http.Client{}
@@ -64,6 +78,39 @@ func query(key string) ResponseList {
 	return list
 }
 
+func queryV2(key string) ResponseListSougou {
+	client := &http.Client{}
+	dest := url.QueryEscape(key)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://pic.sogou.com/napi/wap/emoji/searchlist?keyword=%s&spver=&rcer=&tag=0&routeName=emosearch", dest), nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Cookie", "SMYUV=1721632785108869; SUV=004C36F7DB8DDDCA66A07ECCDAC5F875; PIC_DEBUG=off; wuid=1721794252127; FUV=7039de3bcfc32309adc1c127c0dd9eb6; ABTEST=0|1721794465|v1")
+	req.Header.Set("Referer", "https://pic.sogou.com/pic/emo/searchList.jsp?keyword=%E4%BD%A0%E5%A5%BD&spver=&rcer=&tag=1&routeName=emosearch")
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	req.Header.Set("sec-ch-ua", `"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"`)
+	req.Header.Set("sec-ch-ua-mobile", "?0")
+	req.Header.Set("sec-ch-ua-platform", `"macOS"`)
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+	bodyText, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var list ResponseListSougou
+	json.Unmarshal(bodyText, &list)
+	return list
+}
+
 func main() {
 	envs, err := alfred.FlowVariables()
 	if err != nil {
@@ -95,6 +142,35 @@ func main() {
 				defer groups.Done()
 				url := fmt.Sprintf("https://image.dbbqb.com/%s", resList[index].Path)
 				netutil.DownloadFile(file, url)
+			}(i, filename)
+
+			item := alfred.NewItem(fmt.Sprintf("图片 %d", i), "", filename)
+			item.Icon = &alfred.Icon{}
+			item.WithIcon(filename)
+			items.Append(item)
+		}
+		groups.Wait()
+		items.Show()
+	})
+
+	cli.Bind("gets", func(s []string) {
+		items := alfred.NewItems()
+
+		resList := queryV2(s[0])
+		length := len(resList.Data.Emotions)
+		if length > 40 {
+			length = 40
+		}
+
+		groups := sync.WaitGroup{}
+		groups.Add(length)
+		for i := 0; i < length; i++ {
+			picURL := resList.Data.Emotions[i].ThumbSrc
+			filename := path + "/" + strings.ReplaceAll(picURL, "/", "_") + ".jpg"
+
+			go func(index int, file string) {
+				defer groups.Done()
+				netutil.DownloadFile(file, picURL)
 			}(i, filename)
 
 			item := alfred.NewItem(fmt.Sprintf("图片 %d", i), "", filename)
