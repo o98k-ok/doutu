@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"log"
 	"net/http"
@@ -11,13 +14,17 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/duke-git/lancet/netutil"
+	"github.com/duke-git/lancet/v2/convertor"
+	"github.com/duke-git/lancet/v2/netutil"
+	"github.com/google/uuid"
+	"github.com/nfnt/resize"
 	"github.com/o98k-ok/lazy/v2/alfred"
 	"golang.design/x/clipboard"
 )
 
 var (
 	CachePathKey = "cache_path"
+	ResizeWidth  = "resize_width"
 )
 
 type ResponseList []struct {
@@ -121,59 +128,38 @@ func main() {
 	if len(path) == 0 {
 		path = "./data"
 	}
+	width := envs[ResizeWidth]
+	if len(width) == 0 {
+		width = "140"
+	}
 	os.MkdirAll(path, 0755)
 
 	cli := alfred.NewApp("doutu utils")
-	cli.Bind("get", func(s []string) {
+	cli.Bind("uget", func(s []string) {
 		items := alfred.NewItems()
 
-		resList := query(s[0])
-		length := len(resList)
-		if length > 20 {
-			length = 20
+		var urls []string
+		err := json.Unmarshal([]byte(strings.Join(s, "")), &urls)
+		if err != nil {
+			alfred.Log("unmarshal " + strings.Join(s, "") + err.Error())
+			return
+		}
+
+		length := len(urls)
+		if length > 30 {
+			length = 30
 		}
 
 		groups := sync.WaitGroup{}
 		groups.Add(length)
 		for i := 0; i < length; i++ {
-			filename := path + "/" + strings.ReplaceAll(resList[i].Path, "/", "_") + ".jpg"
-
+			filename := path + "/" + uuid.New().String() + ".jpg"
 			go func(index int, file string) {
 				defer groups.Done()
-				url := fmt.Sprintf("https://image.dbbqb.com/%s", resList[index].Path)
-				netutil.DownloadFile(file, url)
+				netutil.DownloadFile(file, urls[i])
 			}(i, filename)
 
-			item := alfred.NewItem(fmt.Sprintf("图片 %d", i), "", filename)
-			item.Icon = &alfred.Icon{}
-			item.WithIcon(filename)
-			items.Append(item)
-		}
-		groups.Wait()
-		items.Show()
-	})
-
-	cli.Bind("gets", func(s []string) {
-		items := alfred.NewItems()
-
-		resList := queryV2(s[0])
-		length := len(resList.Data.Emotions)
-		if length > 40 {
-			length = 40
-		}
-
-		groups := sync.WaitGroup{}
-		groups.Add(length)
-		for i := 0; i < length; i++ {
-			picURL := resList.Data.Emotions[i].ThumbSrc
-			filename := path + "/" + strings.ReplaceAll(picURL, "/", "_") + ".jpg"
-
-			go func(index int, file string) {
-				defer groups.Done()
-				netutil.DownloadFile(file, picURL)
-			}(i, filename)
-
-			item := alfred.NewItem(fmt.Sprintf("图片 %d", i), "", filename)
+			item := alfred.NewItem(fmt.Sprintf("表情 %d", i), "", filename)
 			item.Icon = &alfred.Icon{}
 			item.WithIcon(filename)
 			items.Append(item)
@@ -183,9 +169,43 @@ func main() {
 	})
 
 	cli.Bind("copy", func(s []string) {
-		d, _ := os.ReadFile(s[0])
+		w, _ := convertor.ToInt(width)
+		d, err := ResizeImage(s[0], int(w))
+		if err != nil {
+			alfred.Log("resize " + err.Error())
+			return
+		}
 		clipboard.Write(clipboard.FmtImage, d)
 	})
 
 	cli.Run(os.Args)
+}
+
+func ResizeImage(imgPath string, width int) ([]byte, error) {
+	fs, err := os.Open(imgPath)
+	if err != nil {
+		return nil, err
+	}
+	img, _, err := image.Decode(fs)
+
+	switch {
+	case err == image.ErrFormat:
+		alfred.Log(err.Error())
+		d, err := os.ReadFile(imgPath)
+		return d, err
+	case err != nil:
+		return nil, err
+	case img.Bounds().Dx() > width:
+		rate := float32(width) / float32(img.Bounds().Dx())
+		height := int(float32(img.Bounds().Dy()) * rate)
+		writer := bytes.Buffer{}
+		imgRes := resize.Resize(uint(width), uint(height), img, resize.Lanczos3)
+		if err = jpeg.Encode(&writer, imgRes, nil); err != nil {
+			return nil, err
+		}
+		return writer.Bytes(), nil
+	default:
+		d, err := os.ReadFile(imgPath)
+		return d, err
+	}
 }
