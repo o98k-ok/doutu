@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/gif"
 	"image/jpeg"
 	"io"
 	"log"
@@ -19,12 +20,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/nfnt/resize"
 	"github.com/o98k-ok/lazy/v2/alfred"
-	"golang.design/x/clipboard"
 )
 
 var (
 	CachePathKey = "cache_path"
 	ResizeWidth  = "resize_width"
+	MaxCount     = "max_count"
 )
 
 type ResponseList []struct {
@@ -145,9 +146,10 @@ func main() {
 			return
 		}
 
+		count, _ := convertor.ToInt(envs[MaxCount])
 		length := len(urls)
-		if length > 30 {
-			length = 30
+		if length > int(count) {
+			length = int(count)
 		}
 
 		groups := sync.WaitGroup{}
@@ -168,44 +170,58 @@ func main() {
 		items.Show()
 	})
 
-	cli.Bind("copy", func(s []string) {
+	cli.Bind("resize", func(s []string) {
 		w, _ := convertor.ToInt(width)
-		d, err := ResizeImage(s[0], int(w))
+		f, err := os.Open(s[0])
 		if err != nil {
-			alfred.Log("resize " + err.Error())
+			alfred.Log("open " + err.Error())
 			return
 		}
-		clipboard.Write(clipboard.FmtImage, d)
+		defer f.Close()
+
+		normalIMG, format, err := image.Decode(f)
+		if err != nil || format == "gif" {
+			gifs, err := GifHandle(s[0])
+			if err != nil {
+				alfred.Log("gif " + err.Error())
+				return
+			}
+
+			if len(gifs) > 10 || len(gifs) <= 0 {
+				return
+			}
+			normalIMG = gifs[0]
+		}
+
+		buffer := bytes.Buffer{}
+		jpeg.Encode(&buffer, ResizeImage(normalIMG, int(w)), nil)
+		os.Remove(s[0])
+		os.WriteFile(s[0], buffer.Bytes(), 0644)
 	})
 
 	cli.Run(os.Args)
 }
 
-func ResizeImage(imgPath string, width int) ([]byte, error) {
-	fs, err := os.Open(imgPath)
+func GifHandle(path string) ([]*image.Paletted, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return []*image.Paletted{}, err
 	}
-	img, _, err := image.Decode(fs)
+	defer f.Close()
 
-	switch {
-	case err == image.ErrFormat:
-		alfred.Log(err.Error())
-		d, err := os.ReadFile(imgPath)
-		return d, err
-	case err != nil:
-		return nil, err
-	case img.Bounds().Dx() > width:
-		rate := float32(width) / float32(img.Bounds().Dx())
-		height := int(float32(img.Bounds().Dy()) * rate)
-		writer := bytes.Buffer{}
-		imgRes := resize.Resize(uint(width), uint(height), img, resize.Lanczos3)
-		if err = jpeg.Encode(&writer, imgRes, nil); err != nil {
-			return nil, err
-		}
-		return writer.Bytes(), nil
-	default:
-		d, err := os.ReadFile(imgPath)
-		return d, err
+	gifs, err := gif.DecodeAll(f)
+	if err != nil {
+		return []*image.Paletted{}, err
 	}
+	return gifs.Image, nil
+}
+
+func ResizeImage(img image.Image, width int) image.Image {
+	if img.Bounds().Dx() <= width {
+		return img
+	}
+	rate := float32(width) / float32(img.Bounds().Dx())
+	height := int(float32(img.Bounds().Dy()) * rate)
+	imgRes := resize.Resize(uint(width), uint(height), img, resize.Lanczos3)
+	return imgRes
 }
