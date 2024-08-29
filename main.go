@@ -127,7 +127,8 @@ func main() {
 	}
 	path := envs[CachePathKey]
 	if len(path) == 0 {
-		path = "./data"
+		p, _ := os.Getwd()
+		path = p + "/data"
 	}
 	width := envs[ResizeWidth]
 	if len(width) == 0 {
