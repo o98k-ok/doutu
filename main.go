@@ -152,6 +152,7 @@ func main() {
 		if length > int(count) {
 			length = int(count)
 		}
+		items.Items = make([]*alfred.Item, length)
 
 		groups := sync.WaitGroup{}
 		groups.Add(length)
@@ -159,13 +160,31 @@ func main() {
 			filename := path + "/" + uuid.New().String() + ".jpg"
 			go func(index int, file string) {
 				defer groups.Done()
-				netutil.DownloadFile(file, urls[i])
-			}(i, filename)
+				netutil.DownloadFile(file, urls[index])
 
-			item := alfred.NewItem(fmt.Sprintf("表情 %d", i), "", filename)
-			item.Icon = &alfred.Icon{}
-			item.WithIcon(filename)
-			items.Append(item)
+				f, err := os.Open(file)
+				if err != nil {
+					alfred.Log("open " + err.Error())
+					return
+				}
+				defer f.Close()
+
+				var item *alfred.Item
+				_, format, _ := image.Decode(f)
+				if format == "gif" {
+					_, ok := IsGifAndReturnFirstFrame(file)
+					if ok {
+						item = alfred.NewItem(fmt.Sprintf("GIF 表情 %d", index), "", file)
+					} else {
+						item = alfred.NewItem(fmt.Sprintf("表情 %d", index), "", file)
+					}
+				} else {
+					item = alfred.NewItem(fmt.Sprintf("表情 %d", index), "", file)
+				}
+				item.Icon = &alfred.Icon{}
+				item.WithIcon(file)
+				items.Items[index] = item
+			}(i, filename)
 		}
 		groups.Wait()
 		items.Show()
@@ -182,16 +201,11 @@ func main() {
 
 		normalIMG, format, err := image.Decode(f)
 		if err != nil || format == "gif" {
-			gifs, err := GifHandle(s[0])
-			if err != nil {
-				alfred.Log("gif " + err.Error())
+			img, ok := IsGifAndReturnFirstFrame(s[0])
+			if ok {
 				return
 			}
-
-			if len(gifs) > 10 || len(gifs) <= 0 {
-				return
-			}
-			normalIMG = gifs[0]
+			normalIMG = img
 		}
 
 		buffer := bytes.Buffer{}
@@ -201,6 +215,18 @@ func main() {
 	})
 
 	cli.Run(os.Args)
+}
+
+func IsGifAndReturnFirstFrame(path string) (image.Image, bool) {
+	frames, err := GifHandle(path)
+	if err != nil {
+		return nil, false
+	}
+
+	if len(frames) < 5 {
+		return nil, false
+	}
+	return frames[0], true
 }
 
 func GifHandle(path string) ([]*image.Paletted, error) {
