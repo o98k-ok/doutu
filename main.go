@@ -224,7 +224,7 @@ func IsGifAndReturnFirstFrame(path string) (image.Image, bool) {
 	}
 
 	if len(frames) < 5 {
-		return nil, false
+		return frames[0], false
 	}
 	return frames[0], true
 }
