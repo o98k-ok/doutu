@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/gif"
 	"image/jpeg"
+	_ "image/png"
 	"io"
 	"log"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/duke-git/lancet/v2/convertor"
 	"github.com/duke-git/lancet/v2/netutil"
+	"github.com/duke-git/lancet/v2/slice"
 	"github.com/google/uuid"
 	"github.com/nfnt/resize"
 	"github.com/o98k-ok/lazy/v2/alfred"
@@ -146,6 +148,9 @@ func main() {
 			alfred.Log("unmarshal " + strings.Join(s, "") + err.Error())
 			return
 		}
+
+		// 雨露均沾一下
+		urls = slice.Shuffle(urls)
 
 		count, _ := convertor.ToInt(envs[MaxCount])
 		length := len(urls)
